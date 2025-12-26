@@ -18,7 +18,7 @@ export const signup = async (req, res) => {
     const { username, email, password, role } = req.body;
 
     // Check if user already exists
-    const existingUser = User.findByEmailOrUsername(email, username);
+    const existingUser = await User.findByEmailOrUsername(email, username);
 
     if (existingUser) {
       return res.status(400).json({
@@ -63,7 +63,7 @@ export const login = async (req, res) => {
     const { email, password } = req.body;
 
     // Find user by email
-    const user = User.findByEmail(email);
+    const user = await User.findByEmail(email);
     if (!user) {
       return res.status(401).json({ message: 'Invalid credentials' });
     }
@@ -95,7 +95,7 @@ export const login = async (req, res) => {
 
 export const getProfile = async (req, res) => {
   try {
-    const user = User.findByIdWithoutPassword(req.user.id);
+    const user = await User.findByIdWithoutPassword(req.user.id);
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
     }
@@ -116,7 +116,7 @@ export const forgotPassword = async (req, res) => {
     const { email } = req.body;
 
     // Find user by email
-    const user = User.findByEmail(email);
+    const user = await User.findByEmail(email);
     
     if (!user) {
       // Don't reveal if user exists or not for security
@@ -126,7 +126,7 @@ export const forgotPassword = async (req, res) => {
     }
 
     // Generate reset token
-    const resetToken = user.generatePasswordResetToken();
+    const resetToken = await user.generatePasswordResetToken();
 
     // In production, send this token via email
     // For now, return it in the response (for development/testing)
@@ -153,7 +153,7 @@ export const resetPassword = async (req, res) => {
     const { token, newPassword } = req.body;
 
     // Find user by reset token
-    const user = User.findByResetToken(token);
+    const user = await User.findByResetToken(token);
     
     if (!user) {
       return res.status(400).json({ 

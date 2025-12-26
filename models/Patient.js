@@ -1,4 +1,4 @@
-import { db } from '../config/database.js';
+import { db } from '../config/turso-database.js';
 
 class Patient {
   constructor(data) {
@@ -18,27 +18,30 @@ class Patient {
   }
 
   // Create a new patient
-  static create(patientData) {
+  static async create(patientData) {
     const { idCard, name, dateOfBirth = null, type = null, charges = 0, createdBy, visitCount = 0 } = patientData;
 
-    const stmt = db.prepare(`
-      INSERT INTO patients (idCard, name, dateOfBirth, type, charges, visitCount, createdBy)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `);
+    const result = await db.execute({
+      sql: `INSERT INTO patients (idCard, name, dateOfBirth, type, charges, visitCount, createdBy) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      args: [idCard.toUpperCase(), name, dateOfBirth, type, charges, visitCount, createdBy]
+    });
 
-    const result = stmt.run(idCard.toUpperCase(), name, dateOfBirth, type, charges, visitCount, createdBy);
-    return Patient.findById(result.lastInsertRowid);
+    return Patient.findById(Number(result.lastInsertRowid));
   }
 
   // Find patient by ID
-  static findById(id) {
-    const stmt = db.prepare(`
-      SELECT p.*, u.username as createdByUsername, u.email as createdByEmail
-      FROM patients p
-      LEFT JOIN users u ON p.createdBy = u.id
-      WHERE p.id = ?
-    `);
-    const row = stmt.get(id);
+  static async findById(id) {
+    const result = await db.execute({
+      sql: `
+        SELECT p.*, u.username as createdByUsername, u.email as createdByEmail
+        FROM patients p
+        LEFT JOIN users u ON p.createdBy = u.id
+        WHERE p.id = ?
+      `,
+      args: [id]
+    });
+    
+    const row = result.rows[0];
     if (!row) return null;
     
     const patient = new Patient(row);
@@ -52,14 +55,18 @@ class Patient {
   }
 
   // Find patient by ID card
-  static findByIdCard(idCard) {
-    const stmt = db.prepare('SELECT * FROM patients WHERE idCard = ?');
-    const row = stmt.get(idCard.toUpperCase());
+  static async findByIdCard(idCard) {
+    const result = await db.execute({
+      sql: 'SELECT * FROM patients WHERE idCard = ?',
+      args: [idCard.toUpperCase()]
+    });
+    
+    const row = result.rows[0];
     return row ? new Patient(row) : null;
   }
 
   // Find all patients with pagination and search
-  static findAll(options = {}) {
+  static async findAll(options = {}) {
     const { page = 1, limit = 10, search = '' } = options;
     const skip = (page - 1) * limit;
 
@@ -68,21 +75,23 @@ class Patient {
       FROM patients p
       LEFT JOIN users u ON p.createdBy = u.id
     `;
-    const params = [];
+    const args = [];
 
     if (search) {
       query += ' WHERE p.idCard LIKE ? OR p.name LIKE ?';
       const searchPattern = `%${search}%`;
-      params.push(searchPattern, searchPattern);
+      args.push(searchPattern, searchPattern);
     }
 
     query += ' ORDER BY p.createdAt DESC LIMIT ? OFFSET ?';
-    params.push(limit, skip);
+    args.push(limit, skip);
 
-    const stmt = db.prepare(query);
-    const rows = stmt.all(...params);
+    const result = await db.execute({
+      sql: query,
+      args: args
+    });
 
-    const patients = rows.map(row => {
+    const patients = result.rows.map(row => {
       const patient = new Patient(row);
       if (row.createdByUsername) {
         patient.createdByUser = {
@@ -95,73 +104,81 @@ class Patient {
 
     // Get total count
     let countQuery = 'SELECT COUNT(*) as total FROM patients';
-    const countParams = [];
+    const countArgs = [];
     if (search) {
       countQuery += ' WHERE idCard LIKE ? OR name LIKE ?';
       const searchPattern = `%${search}%`;
-      countParams.push(searchPattern, searchPattern);
+      countArgs.push(searchPattern, searchPattern);
     }
-    const countStmt = db.prepare(countQuery);
-    const countResult = countStmt.get(...countParams);
+    
+    const countResult = await db.execute({
+      sql: countQuery,
+      args: countArgs
+    });
+
+    const total = Number(countResult.rows[0].total);
 
     return {
       patients,
-      total: countResult.total,
+      total,
       page,
       limit,
-      pages: Math.ceil(countResult.total / limit)
+      pages: Math.ceil(total / limit)
     };
   }
 
   // Update patient
-  update(updates) {
+  async update(updates) {
     const { name, dateOfBirth, type, charges } = updates;
     const updatesList = [];
-    const params = [];
+    const args = [];
 
     if (name !== undefined) {
       updatesList.push('name = ?');
-      params.push(name);
+      args.push(name);
     }
     if (dateOfBirth !== undefined) {
       updatesList.push('dateOfBirth = ?');
-      params.push(dateOfBirth);
+      args.push(dateOfBirth);
     }
     if (type !== undefined) {
       updatesList.push('type = ?');
-      params.push(type);
+      args.push(type);
     }
     if (charges !== undefined) {
       updatesList.push('charges = ?');
-      params.push(charges);
+      args.push(charges);
     }
 
     if (updatesList.length === 0) {
       return this;
     }
 
-    params.push(this.id);
-    const stmt = db.prepare(`UPDATE patients SET ${updatesList.join(', ')} WHERE id = ?`);
-    stmt.run(...params);
+    args.push(this.id);
+    await db.execute({
+      sql: `UPDATE patients SET ${updatesList.join(', ')} WHERE id = ?`,
+      args: args
+    });
 
     return Patient.findById(this.id);
   }
 
   // Save patient (for visitCount updates)
-  save() {
-    const stmt = db.prepare(`
-      UPDATE patients 
-      SET visitCount = ?, isActive = ?
-      WHERE id = ?
-    `);
-    stmt.run(this.visitCount, this.isActive ? 1 : 0, this.id);
+  async save() {
+    await db.execute({
+      sql: `UPDATE patients SET visitCount = ?, isActive = ? WHERE id = ?`,
+      args: [this.visitCount, this.isActive ? 1 : 0, this.id]
+    });
+    
     return Patient.findById(this.id);
   }
 
   // Delete patient
-  static deleteById(id) {
-    const stmt = db.prepare('DELETE FROM patients WHERE id = ?');
-    stmt.run(id);
+  static async deleteById(id) {
+    await db.execute({
+      sql: 'DELETE FROM patients WHERE id = ?',
+      args: [id]
+    });
   }
 
   // Convert to JSON

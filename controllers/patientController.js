@@ -50,7 +50,7 @@ export const bulkImportPatients = async (req, res) => {
         }
 
         // Check if patient already exists
-        const existingPatient = Patient.findByIdCard(idCard);
+        const existingPatient = await Patient.findByIdCard(idCard);
         if (existingPatient) {
           throw new Error(`Patient with ID card ${idCard} already exists`);
         }
@@ -90,7 +90,7 @@ export const bulkImportPatients = async (req, res) => {
         }
 
         // Create patient
-        const patient = Patient.create({
+        const patient = await Patient.create({
           idCard,
           name,
           dateOfBirth,
@@ -143,7 +143,7 @@ export const createPatient = async (req, res) => {
     const { idCard, name, dateOfBirth, type, charges, visitCount } = req.body;
 
     // Check if patient with this ID card already exists
-    const existingPatient = Patient.findByIdCard(idCard);
+    const existingPatient = await Patient.findByIdCard(idCard);
     if (existingPatient) {
       return res.status(400).json({ message: 'Patient with this ID card already exists' });
     }
@@ -154,7 +154,7 @@ export const createPatient = async (req, res) => {
         ? Number(visitCount)
         : 0;
 
-    const patient = Patient.create({
+    const patient = await Patient.create({
       idCard,
       name,
       dateOfBirth: dateOfBirth || null,
@@ -181,7 +181,7 @@ export const getAllPatients = async (req, res) => {
     const limit = parseInt(req.query.limit) || 10;
     const search = req.query.search || '';
 
-    const result = Patient.findAll({ page, limit, search });
+    const result = await Patient.findAll({ page, limit, search });
 
     res.json({
       patients: result.patients.map(p => p.toJSON()),
@@ -201,17 +201,17 @@ export const getAllPatients = async (req, res) => {
 // Get patient by ID
 export const getPatientById = async (req, res) => {
   try {
-    const patient = Patient.findById(req.params.id);
+    const patient = await Patient.findById(req.params.id);
 
     if (!patient) {
       return res.status(404).json({ message: 'Patient not found' });
     }
 
     // Get all patient visits
-    const allVisits = Visit.findByPatientId(patient.id, 'visitNumber', 'DESC');
+    const allVisits = await Visit.findByPatientId(patient.id, 'visitNumber', 'DESC');
     
     // Get current month's visits
-    const currentMonthVisits = Visit.findCurrentMonthVisits(patient.id);
+    const currentMonthVisits = await Visit.findCurrentMonthVisits(patient.id);
     const monthlyVisitCount = currentMonthVisits.length;
 
     res.json({
@@ -236,7 +236,7 @@ export const updatePatient = async (req, res) => {
     }
 
     const { name, dateOfBirth, type, charges } = req.body;
-    const patient = Patient.findById(req.params.id);
+    const patient = await Patient.findById(req.params.id);
 
     if (!patient) {
       return res.status(404).json({ message: 'Patient not found' });
@@ -248,7 +248,7 @@ export const updatePatient = async (req, res) => {
     if (type !== undefined) updates.type = type;
     if (charges !== undefined) updates.charges = charges;
 
-    const updatedPatient = patient.update(updates);
+    const updatedPatient = await patient.update(updates);
 
     res.json({
       message: 'Patient updated successfully',
@@ -263,17 +263,17 @@ export const updatePatient = async (req, res) => {
 // Delete patient
 export const deletePatient = async (req, res) => {
   try {
-    const patient = Patient.findById(req.params.id);
+    const patient = await Patient.findById(req.params.id);
 
     if (!patient) {
       return res.status(404).json({ message: 'Patient not found' });
     }
 
     // Delete all visits associated with this patient (handled by foreign key cascade)
-    Visit.deleteByPatientId(patient.id);
+    await Visit.deleteByPatientId(patient.id);
 
     // Delete patient
-    Patient.deleteById(patient.id);
+    await Patient.deleteById(patient.id);
 
     res.json({ message: 'Patient deleted successfully' });
   } catch (error) {
@@ -286,14 +286,14 @@ export const deletePatient = async (req, res) => {
 export const recordVisit = async (req, res) => {
   try {
     const { notes, charges } = req.body;
-    const patient = Patient.findById(req.params.id);
+    const patient = await Patient.findById(req.params.id);
 
     if (!patient) {
       return res.status(404).json({ message: 'Patient not found' });
     }
 
     // Get current month's visit count (monthly reset logic)
-    const currentMonthVisitCount = Visit.countCurrentMonthVisits(patient.id);
+    const currentMonthVisitCount = await Visit.countCurrentMonthVisits(patient.id);
     const monthlyVisitNumber = currentMonthVisitCount + 1;
 
     // Increment total visit count
@@ -305,7 +305,7 @@ export const recordVisit = async (req, res) => {
     const visitCharges = isFreeVisit ? 0 : (charges || patient.charges || 0);
 
     // Create visit record
-    const visit = Visit.create({
+    const visit = await Visit.create({
       patientId: patient.id,
       visitNumber: totalVisitNumber,
       isFreeVisit,
@@ -316,7 +316,7 @@ export const recordVisit = async (req, res) => {
     });
 
     // Save updated patient
-    patient.save();
+    await patient.save();
 
     res.status(201).json({
       message: 'Visit recorded successfully',
@@ -336,7 +336,7 @@ export const recordVisit = async (req, res) => {
 // Mark visit as paid
 export const markVisitPaid = async (req, res) => {
   try {
-    const visit = Visit.findById(req.params.visitId);
+    const visit = await Visit.findById(req.params.visitId);
 
     if (!visit) {
       return res.status(404).json({ message: 'Visit not found' });
@@ -347,7 +347,7 @@ export const markVisitPaid = async (req, res) => {
     }
 
     visit.paid = true;
-    const updatedVisit = visit.save();
+    const updatedVisit = await visit.save();
 
     res.json({
       message: 'Visit marked as paid',
@@ -362,14 +362,14 @@ export const markVisitPaid = async (req, res) => {
 // Get patient visits
 export const getPatientVisits = async (req, res) => {
   try {
-    const patient = Patient.findById(req.params.id);
+    const patient = await Patient.findById(req.params.id);
 
     if (!patient) {
       return res.status(404).json({ message: 'Patient not found' });
     }
 
-    const allVisits = Visit.findByPatientId(patient.id, 'visitNumber', 'DESC');
-    const currentMonthVisits = Visit.findCurrentMonthVisits(patient.id);
+    const allVisits = await Visit.findByPatientId(patient.id, 'visitNumber', 'DESC');
+    const currentMonthVisits = await Visit.findCurrentMonthVisits(patient.id);
     const monthlyVisitCount = currentMonthVisits.length;
 
     res.json({
@@ -398,7 +398,7 @@ export const cleanupOldVisits = async (req, res) => {
     }
 
     // Delete old visits
-    const deletedCount = Visit.deleteOldVisits(monthsOld);
+    const deletedCount = await Visit.deleteOldVisits(monthsOld);
 
     res.json({
       message: `Successfully cleaned up old visit records`,

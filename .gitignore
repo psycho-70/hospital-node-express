@@ -36,3 +36,5 @@ data/
 *.db-shm
 *.db-wal
 
+# Vercel
+.vercel

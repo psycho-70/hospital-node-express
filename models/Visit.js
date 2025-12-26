@@ -1,4 +1,4 @@
-import { db } from '../config/database.js';
+import { db } from '../config/turso-database.js';
 
 class Visit {
   constructor(data) {
@@ -17,35 +17,30 @@ class Visit {
   }
 
   // Create a new visit
-  static create(visitData) {
+  static async create(visitData) {
     const { patientId, visitNumber, isFreeVisit = true, charges = 0, paid = false, notes = '', createdBy } = visitData;
 
-    const stmt = db.prepare(`
-      INSERT INTO visits (patientId, visitNumber, isFreeVisit, charges, paid, notes, createdBy)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `);
+    const result = await db.execute({
+      sql: `INSERT INTO visits (patientId, visitNumber, isFreeVisit, charges, paid, notes, createdBy) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      args: [patientId, visitNumber, isFreeVisit ? 1 : 0, charges, paid ? 1 : 0, notes, createdBy]
+    });
 
-    const result = stmt.run(
-      patientId,
-      visitNumber,
-      isFreeVisit ? 1 : 0,
-      charges,
-      paid ? 1 : 0,
-      notes,
-      createdBy
-    );
-    return Visit.findById(result.lastInsertRowid);
+    return Visit.findById(Number(result.lastInsertRowid));
   }
 
   // Find visit by ID
-  static findById(id) {
-    const stmt = db.prepare(`
-      SELECT v.*, u.username as createdByUsername
-      FROM visits v
-      LEFT JOIN users u ON v.createdBy = u.id
-      WHERE v.id = ?
-    `);
-    const row = stmt.get(id);
+  static async findById(id) {
+    const result = await db.execute({
+      sql: `
+        SELECT v.*, u.username as createdByUsername
+        FROM visits v
+        LEFT JOIN users u ON v.createdBy = u.id
+        WHERE v.id = ?
+      `,
+      args: [id]
+    });
+    
+    const row = result.rows[0];
     if (!row) return null;
     
     const visit = new Visit(row);
@@ -58,22 +53,24 @@ class Visit {
   }
 
   // Find visits by patient ID
-  static findByPatientId(patientId, sortBy = 'visitNumber', order = 'ASC') {
+  static async findByPatientId(patientId, sortBy = 'visitNumber', order = 'ASC') {
     const validSortBy = ['visitNumber', 'createdAt'];
     const validOrder = ['ASC', 'DESC'];
     const sortColumn = validSortBy.includes(sortBy) ? sortBy : 'visitNumber';
     const sortOrder = validOrder.includes(order.toUpperCase()) ? order.toUpperCase() : 'ASC';
 
-    const stmt = db.prepare(`
-      SELECT v.*, u.username as createdByUsername
-      FROM visits v
-      LEFT JOIN users u ON v.createdBy = u.id
-      WHERE v.patientId = ?
-      ORDER BY v.${sortColumn} ${sortOrder}
-    `);
-    const rows = stmt.all(patientId);
+    const result = await db.execute({
+      sql: `
+        SELECT v.*, u.username as createdByUsername
+        FROM visits v
+        LEFT JOIN users u ON v.createdBy = u.id
+        WHERE v.patientId = ?
+        ORDER BY v.${sortColumn} ${sortOrder}
+      `,
+      args: [patientId]
+    });
 
-    return rows.map(row => {
+    return result.rows.map(row => {
       const visit = new Visit(row);
       if (row.createdByUsername) {
         visit.createdByUser = {
@@ -85,89 +82,95 @@ class Visit {
   }
 
   // Update visit
-  update(updates) {
+  async update(updates) {
     const { paid, charges, notes } = updates;
     const updatesList = [];
-    const params = [];
+    const args = [];
 
     if (paid !== undefined) {
       updatesList.push('paid = ?');
-      params.push(paid ? 1 : 0);
+      args.push(paid ? 1 : 0);
     }
     if (charges !== undefined) {
       updatesList.push('charges = ?');
-      params.push(charges);
+      args.push(charges);
     }
     if (notes !== undefined) {
       updatesList.push('notes = ?');
-      params.push(notes);
+      args.push(notes);
     }
 
     if (updatesList.length === 0) {
       return this;
     }
 
-    params.push(this.id);
-    const stmt = db.prepare(`UPDATE visits SET ${updatesList.join(', ')} WHERE id = ?`);
-    stmt.run(...params);
+    args.push(this.id);
+    await db.execute({
+      sql: `UPDATE visits SET ${updatesList.join(', ')} WHERE id = ?`,
+      args: args
+    });
 
     return Visit.findById(this.id);
   }
 
   // Save visit
-  save() {
-    const stmt = db.prepare(`
-      UPDATE visits 
-      SET paid = ?, charges = ?, notes = ?
-      WHERE id = ?
-    `);
-    stmt.run(this.paid ? 1 : 0, this.charges, this.notes, this.id);
+  async save() {
+    await db.execute({
+      sql: `UPDATE visits SET paid = ?, charges = ?, notes = ? WHERE id = ?`,
+      args: [this.paid ? 1 : 0, this.charges, this.notes, this.id]
+    });
+    
     return Visit.findById(this.id);
   }
 
   // Delete visits by patient ID
-  static deleteByPatientId(patientId) {
-    const stmt = db.prepare('DELETE FROM visits WHERE patientId = ?');
-    stmt.run(patientId);
+  static async deleteByPatientId(patientId) {
+    await db.execute({
+      sql: 'DELETE FROM visits WHERE patientId = ?',
+      args: [patientId]
+    });
   }
 
   // Get count of visits for current month
-  static countCurrentMonthVisits(patientId) {
+  static async countCurrentMonthVisits(patientId) {
     const now = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     const startOfNextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
     
-    const stmt = db.prepare(`
-      SELECT COUNT(*) as count 
-      FROM visits 
-      WHERE patientId = ? 
-      AND datetime(createdAt) >= datetime(?)
-      AND datetime(createdAt) < datetime(?)
-    `);
+    const result = await db.execute({
+      sql: `
+        SELECT COUNT(*) as count 
+        FROM visits 
+        WHERE patientId = ? 
+        AND datetime(createdAt) >= datetime(?)
+        AND datetime(createdAt) < datetime(?)
+      `,
+      args: [patientId, startOfMonth.toISOString(), startOfNextMonth.toISOString()]
+    });
     
-    const result = stmt.get(patientId, startOfMonth.toISOString(), startOfNextMonth.toISOString());
-    return result ? result.count : 0;
+    return result.rows[0] ? Number(result.rows[0].count) : 0;
   }
 
   // Get visits for current month
-  static findCurrentMonthVisits(patientId) {
+  static async findCurrentMonthVisits(patientId) {
     const now = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     const startOfNextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
     
-    const stmt = db.prepare(`
-      SELECT v.*, u.username as createdByUsername
-      FROM visits v
-      LEFT JOIN users u ON v.createdBy = u.id
-      WHERE v.patientId = ? 
-      AND datetime(v.createdAt) >= datetime(?)
-      AND datetime(v.createdAt) < datetime(?)
-      ORDER BY v.createdAt ASC
-    `);
+    const result = await db.execute({
+      sql: `
+        SELECT v.*, u.username as createdByUsername
+        FROM visits v
+        LEFT JOIN users u ON v.createdBy = u.id
+        WHERE v.patientId = ? 
+        AND datetime(v.createdAt) >= datetime(?)
+        AND datetime(v.createdAt) < datetime(?)
+        ORDER BY v.createdAt ASC
+      `,
+      args: [patientId, startOfMonth.toISOString(), startOfNextMonth.toISOString()]
+    });
     
-    const rows = stmt.all(patientId, startOfMonth.toISOString(), startOfNextMonth.toISOString());
-    
-    return rows.map(row => {
+    return result.rows.map(row => {
       const visit = new Visit(row);
       if (row.createdByUsername) {
         visit.createdByUser = {
@@ -179,13 +182,16 @@ class Visit {
   }
 
   // Delete visits older than specified months
-  static deleteOldVisits(monthsOld = 1) {
+  static async deleteOldVisits(monthsOld = 1) {
     const cutoffDate = new Date();
     cutoffDate.setMonth(cutoffDate.getMonth() - monthsOld);
     
-    const stmt = db.prepare('DELETE FROM visits WHERE datetime(createdAt) < datetime(?)');
-    const result = stmt.run(cutoffDate.toISOString());
-    return result.changes;
+    const result = await db.execute({
+      sql: 'DELETE FROM visits WHERE datetime(createdAt) < datetime(?)',
+      args: [cutoffDate.toISOString()]
+    });
+    
+    return Number(result.rowsAffected || 0);
   }
 
   // Convert to JSON
