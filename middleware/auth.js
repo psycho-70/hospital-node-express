@@ -9,7 +9,7 @@ export const authenticate = async (req, res, next) => {
       return res.status(401).json({ message: 'No token provided, authorization denied' });
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'ClinicManagementSystem');
+    const decoded = jwt.verify(token, process.env.JWT_SECRET );
     const user = await User.findByIdWithoutPassword(decoded.userId);
 
     if (!user) {
